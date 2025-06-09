@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { useSettings } from '@/contexts/SettingsContext';
 import { ColorPicker } from './ColorPicker';
+import type { ColorTheme } from '@/contexts/SettingsContext';
 
 export const SettingsPanel = () => {
   const { colors, updateComponentColors, resetColors, isSettingsOpen, setIsSettingsOpen } = useSettings();
@@ -47,11 +48,11 @@ export const SettingsPanel = () => {
                 <div key={componentName} className="space-y-3">
                   <h4 className="font-medium text-green-300 capitalize">{componentName.replace(/([A-Z])/g, ' $1')}</h4>
                   <div className="space-y-2">
-                    {Object.entries(componentColors).map(([colorKey, colorValue]) => (
+                    {Object.entries(componentColors as ColorTheme).map(([colorKey, colorValue]) => (
                       <ColorPicker
                         key={`${componentName}-${colorKey}`}
                         label={colorKey}
-                        value={colorValue}
+                        value={colorValue as string}
                         onChange={(newColor) => 
                           updateComponentColors(componentName as keyof typeof colors, { [colorKey]: newColor })
                         }
