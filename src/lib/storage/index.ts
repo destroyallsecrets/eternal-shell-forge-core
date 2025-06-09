@@ -1,4 +1,5 @@
 import { MCPServer, Message, MCPSettings } from '../../types';
+import { IDBResult, IDBTransaction, CacheStats, CacheConfig, CacheItem } from './types';
 
 export class MCPStorage {
   private static instance: MCPStorage;
@@ -9,16 +10,32 @@ export class MCPStorage {
     messages: 'messages',
     settings: 'settings'
   };
-
-  private constructor() {
-    this.initDB();
-  }
+  private cacheStats: CacheStats = {
+    hitCount: 0,
+    missCount: 0,
+    totalSize: 0,
+    maxCapacity: 1000
+  };
+  private cacheConfig: CacheConfig = {
+    maxCapacity: 1000,
+    cleanupInterval: 5 * 60 * 1000, // 5 minutes
+    defaultTTL: 60 * 1000 // 1 minute
+  };
 
   static getInstance(): MCPStorage {
     if (!MCPStorage.instance) {
       MCPStorage.instance = new MCPStorage();
     }
     return MCPStorage.instance;
+  }
+
+  getCacheStats(): CacheStats {
+    return { ...this.cacheStats };
+  }
+
+  private constructor() {
+    this.initDB();
+    this.setupCacheCleanup();
   }
 
   private initDB(): void {
@@ -108,13 +125,193 @@ export class MCPStorage {
         console.log(`Transaction for ${storeName} completed`);
       };
       transaction.onerror = (event) => {
-        console.error(`Transaction error for ${storeName}:`, event.target?.error);
+        console.error(`Transaction error for ${storeName}:`, (event.target as any)?.error);
       };
       return transaction.objectStore(storeName);
     } catch (error) {
       console.error(`Failed to get store ${storeName}:`, error);
       return null;
     }
+  }
+
+  private async batchOperation(transaction: IDBTransaction): Promise<IDBResult[]> {
+    return new Promise((resolve, reject) => {
+      const store = this.getStore(transaction.storeName, transaction.mode);
+      if (!store) {
+        reject({ success: false, error: new Error('Database not initialized') });
+        return;
+      }
+
+      const results: IDBResult[] = [];
+      const operations = transaction.operations;
+
+      const requests: IDBRequest[] = [];
+      operations.forEach(op => {
+        let request: IDBRequest;
+        switch (op.type) {
+          case 'add':
+            request = store.add(op.data);
+            break;
+          case 'put':
+            request = store.put(op.data);
+            break;
+          case 'get':
+            request = store.get(op.key);
+            break;
+          case 'delete':
+            request = store.delete(op.key);
+            break;
+        }
+        requests.push(request);
+      });
+
+      // Wait for all requests to complete
+      let completedCount = 0;
+      requests.forEach((request, index) => {
+        request.onsuccess = () => {
+          results[index] = { success: true, data: request.result };
+          if (++completedCount === requests.length) {
+            resolve(results);
+          }
+        };
+        request.onerror = () => {
+          results[index] = { success: false, error: request.error };
+          if (++completedCount === requests.length) {
+            resolve(results);
+          }
+        };
+      });
+    });
+  }
+
+  // Cache methods
+  private async addToCache(key: string, value: any, ttl: number = 60000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const cacheStore = this.getStore('cache', 'readwrite');
+      if (!cacheStore) {
+        reject('Database not initialized');
+        return;
+      }
+
+      // Check if cache is at capacity
+      if (this.cacheStats.totalSize >= this.cacheConfig.maxCapacity) {
+        this.cleanupCache().catch(error => console.error('Cache cleanup failed:', error));
+      }
+
+      const cacheItem: CacheItem = {
+        id: Date.now().toString(),
+        key,
+        value,
+        timestamp: Date.now(),
+        ttl,
+        accessCount: 0,
+        lastAccess: Date.now()
+      };
+
+      const request = cacheStore.add(cacheItem);
+      request.onsuccess = () => {
+        this.cacheStats.totalSize++;
+        resolve();
+      };
+      request.onerror = (event) => reject((event.target as any)?.error);
+    });
+  }
+
+  private async getFromCache(key: string): Promise<any | null> {
+    return new Promise((resolve) => {
+      const cacheStore = this.getStore('cache');
+      if (!cacheStore) {
+        resolve(null);
+        return;
+      }
+
+      const request = cacheStore.index('key').getAll(key);
+      request.onsuccess = (event) => {
+        const items = (event.target as any)?.result;
+        if (!items?.length) {
+          resolve(null);
+          return;
+        }
+
+        // Get the most recent item
+        const item = items[0];
+        // Check if item is expired
+        if (Date.now() - item.timestamp > item.ttl) {
+          this.removeFromCache(key);
+          resolve(null);
+          return;
+        }
+        resolve(item.value);
+      };
+      request.onerror = (event) => {
+        console.error('Failed to get from cache:', (event.target as any)?.error);
+        resolve(null);
+      };
+    });
+  }
+
+  private async removeFromCache(key: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const cacheStore = this.getStore('cache', 'readwrite');
+      if (!cacheStore) {
+        reject('Database not initialized');
+        return;
+      }
+
+      const request = cacheStore.index('key').getAll(key);
+      request.onsuccess = (event) => {
+        const items = (event.target as any)?.result;
+        if (!items?.length) {
+          resolve();
+          return;
+        }
+
+        // Delete all items with this key
+        items.forEach(item => {
+          cacheStore.delete(item.id);
+        });
+        resolve();
+      };
+      request.onerror = (event) => reject((event.target as any)?.error);
+    });
+  }
+
+  private async cleanupCache(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const cacheStore = this.getStore('cache', 'readwrite');
+      if (!cacheStore) {
+        reject('Database not initialized');
+        return;
+      }
+
+      const request = cacheStore.index('timestamp').getAll();
+      request.onsuccess = (event) => {
+        const items = (event.target as any)?.result;
+        if (!items?.length) {
+          resolve();
+          return;
+        }
+
+        // Delete expired items
+        const now = Date.now();
+        items.forEach(item => {
+          if (now - item.timestamp > item.ttl) {
+            cacheStore.delete(item.id);
+          }
+        });
+        resolve();
+      };
+      request.onerror = (event) => reject((event.target as any)?.error);
+    });
+  }
+
+  // Cache cleanup interval (every 5 minutes)
+  private setupCacheCleanup() {
+    setInterval(() => {
+      this.cleanupCache().catch(error => {
+        console.error('Cache cleanup failed:', error);
+      });
+    }, 5 * 60 * 1000);
   }
 
   // Servers
