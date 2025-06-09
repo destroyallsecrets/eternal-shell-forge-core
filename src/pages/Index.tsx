@@ -1,10 +1,12 @@
-
 import { useState } from 'react';
 import { ServerConnectionPanel } from '@/components/mcp/ServerConnectionPanel';
 import { ServerList } from '@/components/mcp/ServerList';
 import { MessageArea } from '@/components/mcp/MessageArea';
 import { Header } from '@/components/layout/Header';
 import { StatusBar } from '@/components/layout/StatusBar';
+import { SettingsPanel } from '@/components/settings/SettingsPanel';
+import { SettingsProvider } from '@/contexts/SettingsContext';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 
 export interface MCPServer {
   id: string;
@@ -112,38 +114,48 @@ const Index = () => {
     : [];
 
   return (
-    <div className="min-h-screen bg-gray-900 text-green-400 font-mono flex flex-col">
-      <Header />
-      
-      <div className="flex-1 flex border-t border-green-400/30">
-        {/* Left Panel - Server Management */}
-        <div className="w-80 border-r border-green-400/30 flex flex-col bg-gray-800/50">
-          <ServerConnectionPanel onServerAdd={handleServerAdd} />
-          <ServerList 
-            servers={servers}
-            selectedServerId={selectedServerId}
-            onServerSelect={setSelectedServerId}
-            onServerConnect={handleServerConnect}
-            onServerDisconnect={handleServerDisconnect}
-            onServerRemove={handleServerRemove}
-          />
-        </div>
+    <SettingsProvider>
+      <div className="min-h-screen bg-gray-900 text-green-400 font-mono flex flex-col">
+        <Header />
         
-        {/* Right Panel - Message Area */}
-        <div className="flex-1 flex flex-col">
-          <MessageArea 
-            messages={filteredMessages}
-            selectedServer={selectedServer}
-            onSendMessage={handleSendMessage}
-          />
-        </div>
+        <ResizablePanelGroup direction="horizontal" className="flex-1 border-t border-green-400/30">
+          {/* Left Panel - Server Management */}
+          <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+            <div className="h-full border-r border-green-400/30 flex flex-col bg-gray-800/50">
+              <ServerConnectionPanel onServerAdd={handleServerAdd} />
+              <ServerList 
+                servers={servers}
+                selectedServerId={selectedServerId}
+                onServerSelect={setSelectedServerId}
+                onServerConnect={handleServerConnect}
+                onServerDisconnect={handleServerDisconnect}
+                onServerRemove={handleServerRemove}
+              />
+            </div>
+          </ResizablePanel>
+          
+          <ResizableHandle withHandle />
+          
+          {/* Right Panel - Message Area */}
+          <ResizablePanel defaultSize={75}>
+            <div className="h-full flex flex-col">
+              <MessageArea 
+                messages={filteredMessages}
+                selectedServer={selectedServer}
+                onSendMessage={handleSendMessage}
+              />
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+        
+        <StatusBar 
+          serverCount={servers.length}
+          connectedCount={servers.filter(s => s.status === 'connected').length}
+        />
+        
+        <SettingsPanel />
       </div>
-      
-      <StatusBar 
-        serverCount={servers.length}
-        connectedCount={servers.filter(s => s.status === 'connected').length}
-      />
-    </div>
+    </SettingsProvider>
   );
 };
 

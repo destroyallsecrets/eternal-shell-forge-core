@@ -1,5 +1,6 @@
 
 import { Activity, Wifi, WifiOff } from 'lucide-react';
+import { useSettings } from '@/contexts/SettingsContext';
 
 interface StatusBarProps {
   serverCount: number;
@@ -7,8 +8,11 @@ interface StatusBarProps {
 }
 
 export const StatusBar = ({ serverCount, connectedCount }: StatusBarProps) => {
+  const { colors } = useSettings();
+  const statusColors = colors.statusBar;
+
   return (
-    <footer className="bg-gray-800 border-t border-green-400/30 p-2 text-xs">
+    <footer className={`${statusColors.background} ${statusColors.border} border-t p-2 text-xs`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1">
@@ -24,7 +28,7 @@ export const StatusBar = ({ serverCount, connectedCount }: StatusBarProps) => {
             <span>{connectedCount}/{serverCount} Connected</span>
           </div>
         </div>
-        <div className="text-green-400/70">
+        <div className={`${statusColors.secondary}/70`}>
           {new Date().toLocaleTimeString()}
         </div>
       </div>
