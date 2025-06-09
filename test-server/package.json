@@ -1,0 +1,12 @@
+{
+  "name": "mcp-test-server",
+  "version": "1.0.0",
+  "description": "Local MCP server for testing the Eternal Shell Forge Core application",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
