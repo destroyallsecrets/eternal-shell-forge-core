@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ServerConnectionPanel } from '@/components/mcp/ServerConnectionPanel';
 import { ServerList } from '@/components/mcp/ServerList';
 import { MessageArea } from '@/components/mcp/MessageArea';
@@ -7,66 +7,78 @@ import { StatusBar } from '@/components/layout/StatusBar';
 import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { SettingsProvider } from '@/contexts/SettingsContext';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { MCPStorage } from '@/lib/storage';
+import { MCPConnectionManager } from '@/lib/mcp/connection-manager';
+import { MCPServer, Message } from '@/types';
 
-export interface MCPServer {
-  id: string;
-  name: string;
-  url: string;
-  status: 'connected' | 'disconnected' | 'connecting';
-  lastConnected?: Date;
-}
-
-export interface Message {
-  id: string;
-  serverId: string;
-  type: 'request' | 'response' | 'error' | 'info';
-  content: string;
-  timestamp: Date;
-}
+// Remove local type definitions since we're importing from types file
 
 const Index = () => {
   const [servers, setServers] = useState<MCPServer[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
+  const storage = MCPStorage.getInstance();
+  const connectionManager = new MCPConnectionManager({
+    maxConnections: 10,
+    retryDelay: 5000,
+    maxRetries: 3
+  });
 
-  const handleServerAdd = (serverData: { name: string; url: string }) => {
+  useEffect(() => {
+    const initializeApp = async () => {
+      try {
+        // Initialize storage and connections
+        const storedServers = await storage.getServers();
+        setServers(storedServers);
+        
+        // Initialize connection manager
+        await connectionManager.initialize();
+      } catch (error) {
+        console.error('Failed to initialize application:', error);
+      }
+    };
+
+    initializeApp();
+  }, []);
+
+  const handleServerAdd = async (serverData: { name: string; url: string }) => {
     const newServer: MCPServer = {
       id: Date.now().toString(),
       name: serverData.name,
       url: serverData.url,
       status: 'disconnected'
     };
-    setServers(prev => [...prev, newServer]);
+    
+    try {
+      await storage.addServer(newServer);
+      setServers(prev => [...prev, newServer]);
+    } catch (error) {
+      console.error('Failed to add server:', error);
+    }
   };
 
-  const handleServerConnect = (serverId: string) => {
-    setServers(prev => prev.map(server => 
-      server.id === serverId 
-        ? { ...server, status: 'connecting' }
-        : server
-    ));
-    
-    // Simulate connection process
-    setTimeout(() => {
-      setServers(prev => prev.map(server => 
-        server.id === serverId 
-          ? { ...server, status: 'connected', lastConnected: new Date() }
-          : server
-      ));
+  const handleServerConnect = async (serverId: string) => {
+    try {
+      const server = servers.find(s => s.id === serverId);
+      if (!server) return;
+
+      await connectionManager.connect(server);
+      const updatedServer = await storage.getServers().then(servers => 
+        servers.find(s => s.id === serverId)
+      );
       
-      // Add connection success message
-      const connectionMessage: Message = {
-        id: Date.now().toString(),
-        serverId,
-        type: 'info',
-        content: `Successfully connected to MCP server`,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, connectionMessage]);
-    }, 2000);
+      if (updatedServer) {
+        setServers(prev => 
+          prev.map(s => (s.id === serverId ? { ...updatedServer } : s))
+        );
+      }
+    } catch (error) {
+      console.error('Failed to connect to server:', error);
+    }
   };
 
   const handleServerDisconnect = (serverId: string) => {
+    connectionManager.disconnect(serverId, servers);
     setServers(prev => prev.map(server => 
       server.id === serverId 
         ? { ...server, status: 'disconnected' }
@@ -85,27 +97,7 @@ const Index = () => {
   const handleSendMessage = (content: string) => {
     if (!selectedServerId) return;
     
-    const requestMessage: Message = {
-      id: Date.now().toString(),
-      serverId: selectedServerId,
-      type: 'request',
-      content,
-      timestamp: new Date()
-    };
-    
-    setMessages(prev => [...prev, requestMessage]);
-    
-    // Simulate server response
-    setTimeout(() => {
-      const responseMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        serverId: selectedServerId,
-        type: 'response',
-        content: `## Server Response\n\nReceived your message: "${content}"\n\n**Status:** Processing complete\n\n*This is a simulated MCP server response with Markdown formatting.*`,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, responseMessage]);
-    }, 1000);
+    connectionManager.sendMessage(selectedServerId, content);
   };
 
   const selectedServer = servers.find(s => s.id === selectedServerId);

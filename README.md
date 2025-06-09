@@ -36,6 +36,58 @@ npm i
 npm run dev
 ```
 
+## Deployment
+
+This project is deployed using Vercel. To deploy your changes:
+
+1. Ensure you have a Vercel account at https://vercel.com
+2. Install the Vercel CLI:
+```sh
+npm i -g vercel
+```
+
+3. Login to your Vercel account:
+```sh
+vercel login
+```
+
+4. Deploy the project:
+```sh
+vercel
+```
+
+The application will be deployed to a unique URL on Vercel's platform. You can also set up automatic deployments by connecting your GitHub repository to Vercel.
+
+There are several ways of editing your application.
+
+**Use Lovable**
+
+Simply visit the [Lovable Project](https://lovable.dev/projects/59744a59-4c40-479e-9905-2aa12f3fec5f) and start prompting.
+
+Changes made via Lovable will be committed automatically to this repo.
+
+**Use your preferred IDE**
+
+If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+
+The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+
+Follow these steps:
+
+```sh
+# Step 1: Clone the repository using the project's Git URL.
+git clone <YOUR_GIT_URL>
+
+# Step 2: Navigate to the project directory.
+cd <YOUR_PROJECT_NAME>
+
+# Step 3: Install the necessary dependencies.
+npm i
+
+# Step 4: Start the development server with auto-reloading and an instant preview.
+npm run dev
+```
+
 **Edit a file directly in GitHub**
 
 - Navigate to the desired file(s).
