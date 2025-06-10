@@ -3,13 +3,7 @@ export type MCPMessageType = 'command' | 'response' | 'error' | 'event';
 export type MCPCommandName = string;
 export type MCPCommandParams = Record<string, any>;
 export type MCPCommandData = Record<string, any>;
-export type MCPCommandError = {
-  code: number;
-  message: string;
-  details?: any;
-};
 
-// Message Interface
 export interface MCPMessage {
   type: MCPMessageType;
   id?: string;
@@ -17,7 +11,7 @@ export interface MCPMessage {
   command?: MCPCommandName;
   params?: MCPCommandParams;
   data?: MCPCommandData;
-  error?: MCPCommandError;
+  error?: MCPError;
   timestamp: string;
   metadata?: Record<string, any>;
 }

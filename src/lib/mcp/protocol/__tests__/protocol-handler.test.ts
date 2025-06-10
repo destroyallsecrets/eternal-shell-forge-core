@@ -49,7 +49,10 @@ describe('MCPProtocolHandler', () => {
         timestamp: '2024-01-01T00:00:00.000Z',
         error: {
           code: 1000,
-          message: 'Test error'
+          message: 'Test error',
+          type: 'command',
+          timestamp: '',
+          name: ''
         },
         id: correlationId
       };
@@ -103,7 +106,10 @@ describe('MCPProtocolHandler', () => {
         timestamp: '2024-01-01T00:00:00.000Z',
         error: {
           code: 1000,
-          message: 'Test error'
+          message: 'Test error',
+          type: 'command',
+          timestamp: '',
+          name: ''
         },
         id: correlationId
       };
@@ -150,7 +156,7 @@ describe('MCPProtocolHandler', () => {
           message: 'Test error'
         },
         id: correlationId
-      };
+      } as MCPMessage;
       const resolve = jest.fn();
       const reject = jest.fn();
       

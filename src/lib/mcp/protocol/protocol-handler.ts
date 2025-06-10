@@ -1,12 +1,4 @@
-import { 
-  MCPMessage, 
-  MCPMessageType, 
-  MCPMetrics, 
-  MessageCorrelation,
-  ErrorStrategy,
-  ErrorCondition,
-  MCPCommandError
-} from './types';
+import { MCPMessage, MCPMessageType, MCPMetrics, MessageCorrelation, ErrorStrategy, ErrorCondition } from './types';
 import { MCPMessageParser } from './message-parser';
 import { MCPErrorImpl, MCPErrorType } from './error';
 
@@ -21,7 +13,7 @@ export class MCPProtocolHandler {
     this.parser = MCPMessageParser.getInstance();
     this.correlationMap = new Map();
     this.metrics = {
-      connectionTime: 0,
+      connectionTime: Date.now(),
       messageLatency: 0,
       errorRate: 0,
       throughput: 0,
@@ -45,80 +37,60 @@ export class MCPProtocolHandler {
     return MCPProtocolHandler.instance;
   }
 
-  async handleIncoming(message: string): Promise<MCPMessage> {
+  async handleIncoming(message: string): Promise<void> {
     try {
-      const parsed = this.parser.parse(message);
+      const parsed = await this.parser.parse(message);
       this.trackMetrics(parsed);
-      return this.processMessage(parsed);
+      this.processMessage(parsed);
     } catch (error) {
       if (error instanceof MCPErrorImpl) {
-        this.handleError(error);
-        throw error;
+        // Update metrics for error
+        this.metrics.failedMessages++;
+        this.metrics.errorRate = (this.metrics.failedMessages / this.metrics.totalMessages) * 100;
+        this.metrics.retryCount++;
       }
-      throw new MCPErrorImpl({
-        name: 'ProtocolError',
-        message: 'Failed to handle incoming message',
-        code: 2001,
-        type: 'protocol' as MCPErrorType,
-        details: error.message,
-        cause: error,
-        timestamp: new Date().toISOString()
-      });
+      throw error;
     }
   }
 
   async handleOutgoing(message: MCPMessage): Promise<string> {
     try {
+      if (!message.id) {
+        message.id = Date.now().toString();
+      }
+      const serialized = await this.parser.serialize(message);
       this.trackMetrics(message);
-      return this.parser.serialize(message);
+      return serialized;
     } catch (error) {
       if (error instanceof MCPErrorImpl) {
-        this.handleError(error);
-        throw error;
+        // Update metrics for error
+        this.metrics.failedMessages++;
+        this.metrics.errorRate = (this.metrics.failedMessages / this.metrics.totalMessages) * 100;
+        this.metrics.retryCount++;
       }
-      throw new MCPErrorImpl({
-        name: 'ProtocolError',
-        message: 'Failed to handle outgoing message',
-        code: 2002,
-        type: 'protocol' as MCPErrorType,
-        details: error.message,
-        cause: error,
-        timestamp: new Date().toISOString()
-      });
+      throw error;
     }
   }
 
-  private processMessage(message: MCPMessage): MCPMessage {
+  private processMessage(message: MCPMessage): void {
     switch (message.type) {
       case 'command':
-        return this.handleCommand(message);
+        this.handleCommand(message);
+        break;
       case 'response':
-        return this.handleResponse(message);
-      case 'error':
-        if (message.error) {
-          throw new MCPErrorImpl({
-            name: 'ProtocolError',
-            message: message.error.message || 'Unknown error',
-            code: message.error.code || 2003,
-            type: 'protocol' as MCPErrorType,
-            details: message.error,
-            timestamp: new Date().toISOString()
-          });
-        }
-        throw new MCPErrorImpl({
-          name: 'ProtocolError',
-          message: 'Error message missing error details',
-          code: 2003,
-          type: 'protocol' as MCPErrorType,
-          timestamp: new Date().toISOString()
-        });
+        this.handleResponse(message);
+        break;
       case 'event':
-        return this.handleEvent(message);
+        this.handleEvent(message);
+        break;
+      case 'error':
+        this.handleError(message);
+        break;
       default:
         throw new MCPErrorImpl({
           name: 'ProtocolError',
           message: 'Unknown message type',
-          code: 2004,
+          code: 2001,
           type: 'protocol' as MCPErrorType,
           details: { type: message.type },
           timestamp: new Date().toISOString()
@@ -126,55 +98,74 @@ export class MCPProtocolHandler {
     }
   }
 
-  private handleCommand(message: MCPMessage): MCPMessage {
-    const correlation = this.correlationMap.get(message.id || '');
-    if (!correlation) {
-      throw new MCPErrorImpl({
-        name: 'ProtocolError',
-        message: 'No correlation found for command',
-        code: 2005,
-        type: 'protocol' as MCPErrorType,
-        details: { id: message.id },
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    correlation.resolve(message);
-    this.correlationMap.delete(message.id || '');
-    return message;
+  private handleCommand(message: MCPMessage): void {
+    const correlation: MessageCorrelation = {
+      id: message.id!,
+      timestamp: new Date(),
+      timeout: setTimeout(() => {
+        const error = new MCPErrorImpl({
+          name: 'TimeoutError',
+          message: 'Command timed out',
+          code: 2002,
+          type: 'timeout' as MCPErrorType,
+          details: { command: message.command },
+          timestamp: new Date().toISOString()
+        });
+        correlation.reject(error);
+      }, this.errorStrategy.delay),
+      command: message.command!,
+      params: message.params || {},
+      resolve: (response: MCPMessage) => {
+        clearTimeout(correlation.timeout);
+        this.correlationMap.delete(message.id);
+      },
+      reject: (error: Error) => {
+        clearTimeout(correlation.timeout);
+        this.correlationMap.delete(message.id);
+      }
+    };
+    this.correlationMap.set(message.id, correlation);
   }
 
-  private handleResponse(message: MCPMessage): MCPMessage {
-    const correlation = this.correlationMap.get(message.id || '');
+  private handleResponse(message: MCPMessage): void {
+    const correlation = this.correlationMap.get(message.id);
     if (!correlation) {
       throw new MCPErrorImpl({
         name: 'ProtocolError',
         message: 'No correlation found for response',
-        code: 2006,
+        code: 2002,
         type: 'protocol' as MCPErrorType,
         details: { id: message.id },
         timestamp: new Date().toISOString()
       });
     }
-
     correlation.resolve(message);
-    this.correlationMap.delete(message.id || '');
-    return message;
   }
 
-  private handleEvent(message: MCPMessage): MCPMessage {
-    // Handle event messages
-    return message;
+  private handleEvent(message: MCPMessage): void {
+    // Events are broadcast, no correlation needed
   }
 
-  private handleError(error: MCPErrorImpl): void {
-    // Handle error according to strategy
-    if (this.errorStrategy.conditions.some(condition => condition.code === error.code)) {
-      const condition = this.errorStrategy.conditions.find(c => c.code === error.code);
-      if (condition) {
-        condition.handler(error);
-      }
+  private handleError(message: MCPMessage): void {
+    const correlation = this.correlationMap.get(message.id);
+    if (!correlation) {
+      throw new MCPErrorImpl({
+        name: 'ProtocolError',
+        message: 'No correlation found for error',
+        code: 2003,
+        type: 'protocol' as MCPErrorType,
+        details: { id: message.id },
+        timestamp: new Date().toISOString()
+      });
     }
+    correlation.reject(new MCPErrorImpl({
+      name: 'CommandError',
+      message: message.error?.message || 'Unknown error',
+      code: message.error?.code || 2004,
+      type: 'command' as MCPErrorType,
+      details: message.error,
+      timestamp: new Date().toISOString()
+    }));
   }
 
   private trackMetrics(message: MCPMessage): void {
